@@ -1,0 +1,8 @@
+[submodule "rai-robotModels"]
+	path = rai-robotModels
+	url = git@github.com:Jung-Su/rai-robotModels.git
+	branch = jung-su
+[submodule "rai"]
+	path = rai
+	url = git@github.com:Jung-Su/rai.git
+	branch = robotics-lab-2022
