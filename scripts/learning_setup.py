@@ -267,8 +267,9 @@ class Game:
             self.ball.setPosition(new_state_ball)
 
         self.S.setState(self.C.getFrameState())
+        self.S_verbose.setState(self.C.getFrameState())
         
-        self.calculate_state();
+        self.calculate_state()
         
         r = (self.state[0]**2 + self.state[1]**2)**.5
         

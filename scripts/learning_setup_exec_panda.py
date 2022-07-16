@@ -18,7 +18,7 @@ import lib.logger
 import torch
 
 
-def solve_place_ball(komo, position, q_conf_ref_pose, collision_box = True):
+def solve_place_ball(komo, position, q_conf_ref_pose, collision_box = True, force_orientation = True):
 
     # collsion avoidance
     if collision_box:
@@ -29,7 +29,8 @@ def solve_place_ball(komo, position, q_conf_ref_pose, collision_box = True):
     komo.addObjective([0,1.], ry.FS.distance, ["table", "grapper_hand"], ry.OT.ineq, .5e2, [-.05])
 
     # vertical alignement
-    komo.addObjective([1.], ry.FS.scalarProductXZ, [ "grapper_hand", "box" ], ry.OT.eq, [.1e2], [1.])
+    if force_orientation:
+        komo.addObjective([1.], ry.FS.scalarProductXZ, [ "grapper_hand", "box" ], ry.OT.eq, [.1e2], [1.])
 
 
     # position
@@ -128,7 +129,7 @@ def start_direction(frame, code):
 
 class Game:
 
-    def __init__(self, world_configuration = os.path.join(file_path,"../scenarios/pushSimWorldComplete.g")):
+    def __init__(self, num_states = 3, world_configuration = os.path.join(file_path,"../scenarios/pushSimWorldComplete.g")):
         self.C = ry.Config()
 
         self.C.addFrame("ball_start_marker")
@@ -143,7 +144,6 @@ class Game:
 
         self.D = self.C.view()
         self.C.addFile(world_configuration)
-        self.S = self.C.simulation(ry.SimulatorEngine.bullet, False)
         self.S_verbose = self.C.simulation(ry.SimulatorEngine.bullet, True)
         
         self.tau = 0.02
@@ -151,23 +151,27 @@ class Game:
 
         self.box_t = self.C.getFrame("box_t")
         self.ball = self.C.getFrame("ball")
-        self.r_max = 2.4
+        self.r_max = .5
         self.disc_r = .3
         self.disc_angle = .5 # TODO: define meaningful angle
-        self.state = 3*[0]
+        self.state = num_states*[0]
         self.start_r = 0
         self.start_angle = 0
         self.score = 0
         self.r_target_hits = 0
+        self.fail_counter = 0
+        self.fail_counter_constraint = 0
+        self.panda_home_q = self.S_verbose.get_q()
         
         # random initialization 
         self.reset()
         
     def calculate_state(self):
-        x_diff, y_diff = get_xy_position_diff(self.box_t, self.box)
+        x_diff_box, y_diff_box = get_xy_position_diff(self.box_t, self.box)
+        x_diff_ball, y_diff_ball = get_xy_position_diff(self.box, self.ball)
         z_angle_diff = get_z_angle_diff(self.box_t, self.box)
         
-        self.state = [x_diff, y_diff, z_angle_diff]
+        self.state = [x_diff_box, y_diff_box, z_angle_diff, x_diff_ball, y_diff_ball]
 
     
     def executeSplineNeutral(self, path, t):
@@ -177,61 +181,95 @@ class Game:
             self.S_verbose.step([], self.tau, ry.ControlMode.spline)
             self.C.setJointState(self.S_verbose.get_q()) 
 
+    def box_position_feasable(self):
+        q1 = Quaternion(self.box_t.getQuaternion())
+        q = Quaternion( self.box.getQuaternion())
+        qd = q.conjugate * q1
+        phi   = math.atan2( 2 * (qd.w * qd.x + qd.y * qd.z), 1 - 2 * (qd.x**2 + qd.y**2) )
+        theta = math.asin ( 2 * (qd.w * qd.y - qd.z * qd.x) )
+
+        if abs(phi)>.3 or abs(theta)>.3:
+            print("infiseable")
+            return False
+
+        return True
+
+    def return_panda_home(self):
+        waypoints = 15
+        horizon_seconds = 3.
+
+        komo = self.C.komo_path(1., waypoints, horizon_seconds, False)
+
+        if self.fail_counter<2:
+            constraints = solve_place_ball(komo, self.box.getPosition() + np.array([0, 0, .15]), self.panda_home_q)
+        elif self.fail_counter<5:
+            constraints = solve_place_ball(komo, self.box.getPosition() + np.array([0, 0, .5]), self.panda_home_q, force_orientation=False)
+        else:
+            raise ValueError("Could not resolve the situation")
+
+        if constraints > 0.5:
+            print("problem not solved: ", constraints)
+
+        # execute
+        self.executeSplineNeutral(komo.getPath_qOrg(), .2)
+
+        # grab manipulator sensor readings from the simulation
+        q = self.S_verbose.get_q()
+        self.C.setJointState(q); # set your robot model to match the real q
+
+    def calculate_execute_komo(self, target, collision_box = True):
+        waypoints = 15
+        horizon_seconds = 3.
+
+        komo = self.C.komo_path(1., waypoints, horizon_seconds, False)
+
+        constraints = solve_place_ball(komo, target, self.S_verbose.get_q(), collision_box = collision_box)
+
+        if constraints > 0.15:
+            self.fail_counter_constraint += 1
+            if self.fail_counter_constraint > 4:
+                self.return_panda_home()
+        else:
+            self.fail_counter_constraint = 0
+
+        if constraints > 0.3:
+            self.fail_counter+=1
+            self.return_panda_home()
+            print("problem not solved: ", constraints)
+            return False
+
+        # execute
+        self.executeSplineNeutral(komo.getPath_qOrg(), .3)
+
+        # grab manipulator sensor readings from the simulation
+        q = self.S_verbose.get_q()
+        self.C.setJointState(q); # set your robot model to match the real q
+
+        return True
+
     def step(self, action, show_simulation = False):
         reward = 0
         game_over = False
-        waypoints = 15
-        horizon_seconds = 3.
+
+        if not self.box_position_feasable():
+            game_over = True
+            return reward, game_over, self.score
 
         start, direction = start_direction(self.box,np.nonzero(action)[0][0])
         # self.ball.setPosition(start)
 
-        # # Show output in simulation
-        # if show_simulation:
-        #     self.S_verbose.setState(self.C.getFrameState())
-        #     # for t in range(10):
-        #     #     self.S_verbose.step([], 4*self.tau,  ry.ControlMode.none)
-
-        #     for t in range(3):
-        #         time.sleep(self.tau)
-        #         self.S_verbose.step(direction, self.tau,  ry.ControlMode.velocity)
-
-        # else:
-        #     self.S.setState(self.C.getFrameState())
-
-        #     for t in range(6):
-        #         self.S.step(direction, self.tau,  ry.ControlMode.velocity)
-
-        komo = self.C.komo_path(1., waypoints, horizon_seconds, False)
-
         self.ball_start_marker.setPosition(start)
         self.ball_end_marker.setPosition(np.array(start)+.1*np.array(direction))
 
-        constraints = solve_place_ball(komo, start, self.S_verbose.get_q())
+        # go to start position
+        motion_sucess = self.calculate_execute_komo(start)
+        if not motion_sucess:
+            return reward, game_over, self.score
 
-        if constraints > 0.5:
-            print("problem not solved: ", constraints)
-
-        # execute
-        self.executeSplineNeutral(komo.getPath_qOrg(), .2)
-
-        # grab manipulator sensor readings from the simulation
-        q = self.S_verbose.get_q()
-        self.C.setJointState(q); # set your robot model to match the real q
-
-        komo = self.C.komo_path(1., waypoints, horizon_seconds, False)
-
-        constraints = solve_place_ball(komo, np.array(start)+.1*np.array(direction), None, collision_box=False)
-        
-        if constraints > 0.5:
-            print("problem not solved: ", constraints)
-            
-        # execute
-        self.executeSplineNeutral(komo.getPath_qOrg(), .2)
-
-        # grab manipulator sensor readings from the simulation
-        q = self.S_verbose.get_q()
-        self.C.setJointState(q); # set your robot model to match the real q
+        # go to end position
+        motion_sucess = self.calculate_execute_komo(np.array(start)+.1*np.array(direction), collision_box = False)
+        if not motion_sucess:
+            return reward, game_over, self.score
 
         self.calculate_state()
         
@@ -240,7 +278,12 @@ class Game:
         dr = int(r / self.disc_r)
         dangle = int(self.state[2] / self.disc_angle)
         
-        
+        if abs(self.prev_r - r) < 0.00005:
+            self.fail_counter+=1
+            self.return_panda_home()
+            print("No movement of the box: ", self.prev_r - r)
+            return reward, game_over, self.score
+
         if r >= self.r_max: 
             reward = -3.
             print("Distance too large: ", r)
@@ -285,6 +328,10 @@ class Game:
         if game_over:
             self.r_target_hits = 0
 
+        self.prev_r = r
+
+        self.fail_counter = 0 # reset fail counter after sucessful step
+
         return reward, game_over, self.score
         
     def get_state(self):
@@ -292,95 +339,60 @@ class Game:
     
     def reset(self):
         #define the new state of the box to be somewhere around the target:
-        reset_max_dist = 1.
+        reset_max_dist = .4
         state_validated = False
         while (not state_validated):
-            new_state = np.array(self.box_t.getPosition())+np.array([reset_max_dist*np.random.rand() - reset_max_dist/2, reset_max_dist*np.random.rand() - reset_max_dist/2, 0])
-            self.box.setPosition(new_state)
+            init_radius = 0.075+reset_max_dist*np.random.rand()
+            alpha = 2*math.pi*np.random.rand()
+            x = init_radius*math.cos(alpha)
+            y = init_radius*math.sin(alpha)
+
+            new_state = np.array(self.box_t.getPosition())+np.array([x, y, 0])
+
             self.box.setQuaternion(psi_to_quat(2*math.pi*np.random.rand()))
+            self.box.setPosition(new_state)
 
             # make sure the box doesnt colide with the link
-            y, J = self.C.evalFeature(ry.FS.distance, ["panda_coll0", "box"])
-            if (y < -0.1):
+            y1, J1 = self.C.evalFeature(ry.FS.distance, ["panda_coll0", "box"])
+            y2, J2 = self.C.evalFeature(ry.FS.distance, ["ball", "box"])
+
+            if (y1 < -0.1) and (y2 < -0.1):
                 state_validated = True
       
         self.S_verbose.setState(self.C.getFrameState())
-        self.S.setState(self.C.getFrameState())
-
-        # for t in range(3):
-        #     time.sleep(self.tau)
-        #     self.S_verbose.step([], self.tau,  ry.ControlMode.none)
         
         self.calculate_state()
         
         r = (self.state[0]**2 + self.state[1]**2)**.5
         
+        self.prev_r = r
         self.prev_dr = int(r / self.disc_r)
         self.prev_dangle = int(self.state[2] / self.disc_angle)
         
         self.score = 0
-        
-        # Updating the environment
-        # self.S.step([], 0,  ry.ControlMode.none)
-        
-#         for t in range(2):
-#             time.sleep(self.tau)
-#             self.S.step([], self.tau,  ry.ControlMode.none)            
+                
 
         return 
-    
-class LinearSchedule(object):
-    def __init__(self, schedule_timesteps, final_p, initial_p):
-        self.schedule_timesteps = schedule_timesteps
-        self.final_p = final_p
-        self.initial_p = initial_p
-
-    def value(self, t):
-        fraction = min(1.0, float(t) / self.schedule_timesteps)
-        return self.initial_p + (self.final_p - self.initial_p) * fraction
-
-
 
 class Worker:
     def __init__(self, 
-                    # epsilon params
-                    fraction_eps = 0.004, 
-                    initial_eps = .3, 
-                    final_eps = 0.05, 
-
-                    # learning 
-                    max_steps = 10_000_000, 
+                    max_steps = 10_000_000,
+                    # agent params
                     gamma = 0.97, 
                     learning_rate = 1e-3, 
-                    learning_start_itr = 100, 
-                    target_q_update_freq = 600,
-                    train_q_freq = 2,
-
                     # memory 
                     memory_len = 1_000, #10_000 in google code
                     batch_size = 64,
 
                     # network
-                    layers_sizes = [3, 256, 64, 12],
-
-                    # logging
-                    log_freq = 100,
-                    log_dir = os.path.join(file_path,"data/local/game3"),
+                    layers_sizes = [5, 256, 64, 12],
                     
-                    # simulation verbose
-                    sim_verbose_freq_episodes = 100
                 ):
 
-        lib.logger.session(log_dir).__enter__()
-        self.target_q_update_freq = target_q_update_freq
-        self.learning_start_itr = learning_start_itr
-        self.log_freq = log_freq
-        self.train_q_freq = train_q_freq
         self.layers_sizes = layers_sizes
         self.act_dim = self.layers_sizes[-1]
-        self.max_steps = max_steps
         self.sim_verbose = True
-        self.sim_verbose_freq_episodes = sim_verbose_freq_episodes
+        self.max_steps = max_steps
 
         # Learning Agent 
         self.agent = Agent(
@@ -392,116 +404,7 @@ class Worker:
             )
 
         # Environment
-        self.game = Game()
-
-        # Tactics for exploraion/exploitation
-        self.exploration = LinearSchedule(
-            schedule_timesteps=int(fraction_eps * max_steps),
-            initial_p=initial_eps,
-            final_p=final_eps)
-
-
-    def eps_greedy(self, state, epsilon):
-        act = [0]*self.act_dim
-
-        # Check Q function, do argmax.
-        rnd = np.random.rand()
-        if rnd > epsilon:
-            state0 = torch.tensor(state, dtype=torch.float)
-            prediction = self.agent.model(state0)
-            move = torch.argmax(prediction).item()
-            act[move] = 1
-        else:
-            act[np.random.randint(0, self.act_dim)] = 1
-        
-        return act
-
-    def train(self):
-        episode_rewards = []
-        log_itr = 0
-        episodes = 0
-        last_game_itr = 0
-        episode_return_mean_record = 0
-
-        l_episode_return = deque([], maxlen=30)
-        l_tq_squared_error = deque(maxlen=50)   
-        
-        for itr in range(self.max_steps):
-            # get old state
-            state_old = self.game.get_state()
-
-            # get move
-            act = self.eps_greedy(state_old, self.exploration.value(itr))
-
-            # perform move and get new state
-            reward, done, score = self.game.step(act, self.sim_verbose)
-            state_new = self.game.get_state()
-
-            episode_rewards.append(reward)
-
-            # train short memory
-            # self.agent.train_short_memory(state_old, act, reward, state_new, done)
-
-            # remember
-            self.agent.remember(state_old, act, reward, state_new, done)
-
-            if done:
-                self.game.reset()
-
-                # turn off simulation output if it was on
-                if self.sim_verbose:
-                    self.sim_verbose = False               
-
-                # Print basic game statistics
-                print("~~~~~~~~~~ Game ~~~~~~~~~~")
-                print('Running steps:           \t', itr - last_game_itr)
-
-                # save to indicate how many iterations for start to finish of the game:
-                last_game_itr = itr
-                
-                # Reward statistics
-                episode_return = np.sum(episode_rewards)
-                episodes +=1
-                episode_rewards = []
-                print('Reward:                  \t', episode_return)
-                
-                l_episode_return.append(episode_return)
-
-                # Save the model if the preformance increased
-                episode_return_mean = math.ceil(np.mean(l_episode_return)*10)/10
-
-                if  episode_return_mean > episode_return_mean_record:
-                    episode_return_mean_record = episode_return_mean
-                    self.agent.model.save()
-                    print('New mean reward record:  \t', episode_return_mean_record)
-
-                print("~~~~~~~~~~~~~~~~~~~~~~~~~~")
-
-                if episodes % self.sim_verbose_freq_episodes == 0:
-                    self.sim_verbose = True
-
-            if itr % self.target_q_update_freq == 0 and itr > self.learning_start_itr:
-                self.agent.trainer.update_target_model()
-
-            if itr % self.train_q_freq == 0 and itr > self.learning_start_itr:
-                td_squared_error = self.agent.train_long_memory().data
-                l_tq_squared_error.append(td_squared_error)
-
-            if (itr + 1) % self.log_freq == 0 and len(l_episode_return) > 5:
-                log_itr += 1
-                lib.logger.logkv('Iteration', log_itr)
-                lib.logger.logkv('Steps', itr)
-                lib.logger.logkv('Epsilon', self.exploration.value(itr))
-                lib.logger.logkv('Episodes', len(l_episode_return))
-                lib.logger.logkv('AverageReturn', np.mean(l_episode_return))
-                lib.logger.logkv('TDError^2', np.mean(l_tq_squared_error))
-                lib.logger.dumpkvs()
-
-    def train_warm_start(self, model_filename = 'model.pth'):
-        self.agent.trainer.model.restore_from_saved(model_filename)
-        self.agent.trainer.model.train() 
-        self.agent.trainer.update_target_model()
-        self.train()
+        self.game = Game(num_states = self.layers_sizes[0])
 
     def evaluate_model(self, model_filename = 'model.pth'):
         self.agent.trainer.model.restore_from_saved(model_filename)
@@ -553,16 +456,7 @@ class Worker:
 
                 print("~~~~~~~~~~~~~~~~~~~~~~~~~~")
 
-
             
-EVALUATION = True
-WARM_START = False
-# EXEC_PANDA = True
 if __name__ == "__main__":
     setup = Worker()
-    if EVALUATION:
-        setup.evaluate_model(model_filename = 'model_saved2.pth')
-    elif WARM_START:
-        setup.train_warm_start(model_filename = 'model.pth')
-    else:
-        setup.train()
+    setup.evaluate_model(model_filename = 'model.pth')
