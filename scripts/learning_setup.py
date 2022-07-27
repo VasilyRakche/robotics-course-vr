@@ -1,5 +1,6 @@
 import sys
 import os
+from cv2 import rectangle
 file_path = os.path.dirname(os.path.realpath(__file__))
 print(file_path)
 sys.path.append(os.path.join(file_path,'../build'))
@@ -46,54 +47,77 @@ def rad_to_deg(angle):
     return angle/(2*math.pi)*360
 
 
-def start_direction(frame, code):
+  
+def start_direction(frame, code, cylinder=False, cube=True):
     qd = Quaternion(frame.getQuaternion())
     psi   = math.atan2( 2 * (qd.w * qd.z + qd.x * qd.y), 1 - 2 * (qd.y**2 + qd.z**2) )
     
     R = np.array([[math.cos(psi), -math.sin(psi)],
                      [math.sin(psi), math.cos(psi)]])
+
+    if cylinder and cube:
+        raise ValueError("Can not have cylinder and cube settings in the same time")
+
     vel = .6
-    dist = .116 
+    dist = .116
+    distx = .12 + 0.022 + 0.019
     offset = .065   
     
-    if code == 0:
-        rel_start = np.array([-offset, -dist])
-        direction = np.array([0, vel])
-    elif code == 1:
-        rel_start = np.array([0, -dist])
-        direction = np.array([0, vel])
-    elif code == 2:  
-        rel_start = np.array([offset, -dist])
-        direction = np.array([0, vel])
-    elif code == 3:     
-        rel_start = np.array([dist, -offset])
-        direction = np.array([-vel, 0])
-    elif code == 4:     
-        rel_start = np.array([dist, 0])
-        direction = np.array([-vel, 0])
-    elif code == 5:     
-        rel_start = np.array([dist, offset])
-        direction = np.array([-vel, 0])
-    elif code == 6:     
+    if code == 0:     
         rel_start = np.array([offset, dist])
         direction = np.array([0, -vel])
-    elif code == 7:     
+    elif code == 1:     
         rel_start = np.array([0, dist])
         direction = np.array([0, -vel])
-    elif code == 8:     
+    elif code == 2:     
         rel_start = np.array([-offset, dist])
         direction = np.array([0, -vel])
+    elif code == 3:     
+        rel_start = np.array([dist if cube else distx, -offset])
+        direction = np.array([-vel, 0])
+    elif code == 4:     
+        rel_start = np.array([dist if cube else distx, 0])
+        direction = np.array([-vel, 0])
+    elif code == 5:     
+        rel_start = np.array([dist if cube else distx, offset])
+        direction = np.array([-vel, 0])
+    if code == 6:
+        rel_start = np.array([-offset, -dist])
+        direction = np.array([0, vel])
+    elif code == 7:
+        rel_start = np.array([0, -dist])
+        direction = np.array([0, vel])
+    elif code == 8:  
+        rel_start = np.array([offset, -dist])
+        direction = np.array([0, vel])
     elif code == 9:     
-        rel_start = np.array([-dist, offset])
+        rel_start = np.array([-dist if cube else -distx, offset])
         direction = np.array([vel, 0])
     elif code == 10:   
-        rel_start = np.array([-dist, 0])
+        rel_start = np.array([-dist if cube else -distx, 0])
         direction = np.array([vel, 0])
     elif code == 11: 
-        rel_start = np.array([-dist, -offset])
+        rel_start = np.array([-dist if cube else -distx, -offset])
         direction = np.array([vel, 0])
-    
+
+
+    # overwrite the rel_start and direction in case of cylinder
+    if cylinder:
+        angle = code*2*math.pi/12
+        if code == 2 or code == 5 or code ==8 or code == 11:
+            direction *= 1.5
+            angle -= 2*2*math.pi/36
+
+        if code == 1 or code == 4 or code ==7 or code == 10:
+            direction *= 1.1
+            angle -= 2*math.pi/36
+
+        x = dist*math.sin(angle)
+        y = dist*math.cos(angle)
+        rel_start = np.array([x, y])
+
     pos = frame.getPosition()[:2] + R.dot(rel_start)
+
     direction = R.dot(direction)
     return list(pos) + [frame.getPosition()[2]] ,  list(direction) + [0.]
     
@@ -103,6 +127,7 @@ class Game:
     def __init__(self, num_states = 3, world_configuration = os.path.join(file_path,"../scenarios/pushSimWorld.g")):
         self.C = ry.Config()
         self.C.addFile(world_configuration)
+        self.D = self.C.view()
         self.S = self.C.simulation(ry.SimulatorEngine.bullet, False)
         self.S_verbose = self.C.simulation(ry.SimulatorEngine.bullet, True)
         
@@ -245,7 +270,7 @@ class Game:
         
         if random_box_pos:
             # define the new state of the box to be somewhere around the target
-            init_radius = 0.075+.2*np.random.rand()
+            init_radius = 0.075+.5*np.random.rand()
             alpha = 2*math.pi*np.random.rand()
             x = init_radius*math.cos(alpha)
             y = init_radius*math.sin(alpha)
@@ -325,10 +350,10 @@ class Worker:
 
                     # logging
                     log_freq = 100,
-                    log_dir = os.path.join(file_path,"data/local/game_ball"),
+                    log_dir = os.path.join(file_path,"data/local/learn"),
                     
                     # simulation verbose
-                    sim_verbose_freq_episodes = 100
+                    sim_verbose_freq_episodes = 300
                 ):
 
         lib.logger.session(log_dir).__enter__()
@@ -528,7 +553,7 @@ class Worker:
 
             
 EVALUATION = False
-WARM_START = True
+WARM_START = False
 if __name__ == "__main__":
     setup = Worker()
     if EVALUATION:

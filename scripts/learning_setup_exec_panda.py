@@ -1,11 +1,21 @@
 import sys
-import os 
+import os
+from unittest import result
+from cv2 import rectangle 
 file_path = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(os.path.join(file_path,'../build'))
 import numpy as np
 import libry as ry
 import matplotlib.pyplot as plt
 import time
+
+# configuration of different evaluation objects
+EXEC_NO_VERBOSE = False
+EXEC_COMPARISON = False
+
+box_names = ["boxc", "boxcl", "boxr"]
+box_labels = ["Cube", "Cylinder","Cuboid"]
+box_name = "boxcl"
 
 from pyquaternion import Quaternion
 import math
@@ -22,15 +32,15 @@ def solve_place_ball(komo, position, q_conf_ref_pose, collision_box = True, forc
 
     # collsion avoidance
     if collision_box:
-        komo.addObjective([0,1.], ry.FS.distance, ["box", "ball"], ry.OT.ineq, .5e2, [-.05])
-        komo.addObjective([0,1.], ry.FS.distance, ["box", "grapper_hand"], ry.OT.ineq, .5e2, [-.05])
+        komo.addObjective([0,1.], ry.FS.distance, [box_name, "ball"], ry.OT.ineq, .5e2, [-.05])
+        komo.addObjective([0,1.], ry.FS.distance, [box_name, "grapper_hand"], ry.OT.ineq, .5e2, [-.05])
 
     komo.addObjective([0,1.], ry.FS.distance, ["table", "ball"], ry.OT.ineq, .5e2, [-.05])
     komo.addObjective([0,1.], ry.FS.distance, ["table", "grapper_hand"], ry.OT.ineq, .5e2, [-.05])
 
     # vertical alignement
     if force_orientation:
-        komo.addObjective([1.], ry.FS.scalarProductXZ, [ "grapper_hand", "box" ], ry.OT.eq, [.1e2], [1.])
+        komo.addObjective([1.], ry.FS.scalarProductXZ, [ "grapper_hand", box_name ], ry.OT.eq, [.1e2], [1.])
 
 
     # position
@@ -43,6 +53,9 @@ def solve_place_ball(komo, position, q_conf_ref_pose, collision_box = True, forc
         komo.addObjective([0.,1.], ry.FS.qItself, [], ry.OT.sos, [.1e1], q_conf_ref_pose, order=0)
 
     komo.optimize()
+
+    # komo.view(True, "motion")
+    # komo.view_play(True, 0.3)
 
     return komo.getConstraintViolations()
 
@@ -81,51 +94,70 @@ def start_direction(frame, code):
     
     R = np.array([[math.cos(psi), -math.sin(psi)],
                      [math.sin(psi), math.cos(psi)]])
+
     vel = .6
-    dist = .116 
+    dist = .116
+    distx = .12 + 0.022 + 0.019
     offset = .065   
     
-    if code == 0:
-        rel_start = np.array([-offset, -dist])
-        direction = np.array([0, vel])
-    elif code == 1:
-        rel_start = np.array([0, -dist])
-        direction = np.array([0, vel])
-    elif code == 2:  
-        rel_start = np.array([offset, -dist])
-        direction = np.array([0, vel])
-    elif code == 3:     
-        rel_start = np.array([dist, -offset])
-        direction = np.array([-vel, 0])
-    elif code == 4:     
-        rel_start = np.array([dist, 0])
-        direction = np.array([-vel, 0])
-    elif code == 5:     
-        rel_start = np.array([dist, offset])
-        direction = np.array([-vel, 0])
-    elif code == 6:     
+    if code == 0:     
         rel_start = np.array([offset, dist])
         direction = np.array([0, -vel])
-    elif code == 7:     
+    elif code == 1:     
         rel_start = np.array([0, dist])
         direction = np.array([0, -vel])
-    elif code == 8:     
+    elif code == 2:     
         rel_start = np.array([-offset, dist])
         direction = np.array([0, -vel])
+    elif code == 3:     
+        rel_start = np.array([dist if box_name == "boxc" else distx, -offset])
+        direction = np.array([-vel, 0])
+    elif code == 4:     
+        rel_start = np.array([dist if box_name == "boxc" else distx, 0])
+        direction = np.array([-vel, 0])
+    elif code == 5:     
+        rel_start = np.array([dist if box_name == "boxc" else distx, offset])
+        direction = np.array([-vel, 0])
+    if code == 6:
+        rel_start = np.array([-offset, -dist])
+        direction = np.array([0, vel])
+    elif code == 7:
+        rel_start = np.array([0, -dist])
+        direction = np.array([0, vel])
+    elif code == 8:  
+        rel_start = np.array([offset, -dist])
+        direction = np.array([0, vel])
     elif code == 9:     
-        rel_start = np.array([-dist, offset])
+        rel_start = np.array([-dist if box_name == "boxc" else -distx, offset])
         direction = np.array([vel, 0])
     elif code == 10:   
-        rel_start = np.array([-dist, 0])
+        rel_start = np.array([-dist if box_name == "boxc" else -distx, 0])
         direction = np.array([vel, 0])
     elif code == 11: 
-        rel_start = np.array([-dist, -offset])
+        rel_start = np.array([-dist if box_name == "boxc" else -distx, -offset])
         direction = np.array([vel, 0])
-    
+
+
+    # overwrite the rel_start and direction in case of cylinder
+    if box_name == "boxcl":
+        angle = code*2*math.pi/12
+        if code == 2 or code == 5 or code ==8 or code == 11:
+            direction *= 1.5
+            angle -= 2*2*math.pi/36
+
+        if code == 1 or code == 4 or code ==7 or code == 10:
+            direction *= 1.1
+            angle -= 2*math.pi/36
+
+        x = dist*math.sin(angle)
+        y = dist*math.cos(angle)
+        rel_start = np.array([x, y])
+
     pos = frame.getPosition()[:2] + R.dot(rel_start)
+
     direction = R.dot(direction)
     return list(pos) + [frame.getPosition()[2]] ,  list(direction) + [0.]
-    
+
 
 class Game:
 
@@ -144,10 +176,17 @@ class Game:
 
         self.D = self.C.view()
         self.C.addFile(world_configuration)
-        self.S_verbose = self.C.simulation(ry.SimulatorEngine.bullet, True)
-        
+        if EXEC_NO_VERBOSE:
+            self.S_verbose = self.C.simulation(ry.SimulatorEngine.bullet, False)
+        else: 
+            self.S_verbose = self.C.simulation(ry.SimulatorEngine.bullet, True)
+
         self.tau = 0.02
-        self.box = self.C.getFrame("box")
+        self.box = self.C.getFrame(box_name)
+        for box in box_names:
+            if not box==box_name:
+                frame = self.C.getFrame(box)
+                frame.setPosition([0.,0.,0.])
 
         self.box_t = self.C.getFrame("box_t")
         self.ball = self.C.getFrame("ball")
@@ -159,10 +198,12 @@ class Game:
         self.start_angle = 0
         self.score = 0
         self.r_target_hits = 0
-        self.fail_counter = 0
-        self.fail_counter_constraint = 0
+        self.fail_to_move_the_box  = 0
+        self.fail_counter_constraint_soft = 0
         self.panda_home_q = self.S_verbose.get_q()
-        
+        self.exec_fails = 0
+        self.exec_sucesses = 0
+
         # random initialization 
         self.reset()
         
@@ -177,7 +218,8 @@ class Game:
     def executeSplineNeutral(self, path, t):
         self.S_verbose.setMoveto(path, t)
         while self.S_verbose.getTimeToMove() > 0.:
-            time.sleep(self.tau)
+            if not EXEC_NO_VERBOSE:
+                time.sleep(self.tau)
             self.S_verbose.step([], self.tau, ry.ControlMode.spline)
             self.C.setJointState(self.S_verbose.get_q()) 
 
@@ -200,11 +242,12 @@ class Game:
 
         komo = self.C.komo_path(1., waypoints, horizon_seconds, False)
 
-        if self.fail_counter<2:
+        if self.fail_to_move_the_box <2:
             constraints = solve_place_ball(komo, self.box.getPosition() + np.array([0, 0, .15]), self.panda_home_q)
-        elif self.fail_counter<5:
+        elif self.fail_to_move_the_box <5:
             constraints = solve_place_ball(komo, self.box.getPosition() + np.array([0, 0, .5]), self.panda_home_q, force_orientation=False)
         else:
+            return False
             raise ValueError("Could not resolve the situation")
 
         if constraints > 0.5:
@@ -217,6 +260,8 @@ class Game:
         q = self.S_verbose.get_q()
         self.C.setJointState(q); # set your robot model to match the real q
 
+        return True
+
     def calculate_execute_komo(self, target, collision_box = True):
         waypoints = 15
         horizon_seconds = 3.
@@ -226,16 +271,24 @@ class Game:
         constraints = solve_place_ball(komo, target, self.S_verbose.get_q(), collision_box = collision_box)
 
         if constraints > 0.15:
-            self.fail_counter_constraint += 1
-            if self.fail_counter_constraint > 4:
-                self.return_panda_home()
+            self.fail_counter_constraint_soft += 1
+            if self.fail_counter_constraint_soft > 4:
+                if not self.return_panda_home():
+                    self.reset()
+                    print("Reseting state due to unresolved error")
+                    self.fail_to_move_the_box  = 0
+                    self.fail_counter_constraint_soft = 0
+                    return False
         else:
-            self.fail_counter_constraint = 0
+            self.fail_counter_constraint_soft = 0
 
         if constraints > 0.3:
-            self.fail_counter+=1
-            self.return_panda_home()
-            print("problem not solved: ", constraints)
+            self.fail_to_move_the_box+=1
+            if not self.return_panda_home():
+                self.reset()
+                print("Reseting state due to unresolved error")
+                self.fail_to_move_the_box  = 0
+                self.fail_counter_constraint_soft = 0
             return False
 
         # execute
@@ -250,9 +303,11 @@ class Game:
     def step(self, action, show_simulation = False):
         reward = 0
         game_over = False
+        sucess = False
 
         if not self.box_position_feasable():
             game_over = True
+            self.exec_fails+=1
             return reward, game_over, self.score
 
         start, direction = start_direction(self.box,np.nonzero(action)[0][0])
@@ -279,7 +334,7 @@ class Game:
         dangle = int(self.state[2] / self.disc_angle)
         
         if abs(self.prev_r - r) < 0.00005:
-            self.fail_counter+=1
+            self.fail_to_move_the_box +=1
             self.return_panda_home()
             print("No movement of the box: ", self.prev_r - r)
             return reward, game_over, self.score
@@ -301,6 +356,7 @@ class Game:
             # Define desired more precise positioning 
             if r < 0.01 or self.r_target_hits > 2:
                 print("Scored position: ", r)
+                sucess = True
                 game_over = True
                 # Introduce better rewards for more precise positioning 
                 reward = 10 - abs(dangle) - r*5
@@ -330,13 +386,21 @@ class Game:
 
         self.prev_r = r
 
-        self.fail_counter = 0 # reset fail counter after sucessful step
+        self.fail_to_move_the_box  = 0 # reset fail counter after sucessful step
+
+        if game_over and sucess:
+            self.exec_sucesses+=1
+        elif game_over:
+            self.exec_fails+=1
 
         return reward, game_over, self.score
         
     def get_state(self):
         return self.state
-    
+
+    def get_exec_stats(self):
+        return (self.exec_sucesses, self.exec_fails)
+
     def reset(self):
         #define the new state of the box to be somewhere around the target:
         reset_max_dist = .4
@@ -353,8 +417,8 @@ class Game:
             self.box.setPosition(new_state)
 
             # make sure the box doesnt colide with the link
-            y1, J1 = self.C.evalFeature(ry.FS.distance, ["panda_coll0", "box"])
-            y2, J2 = self.C.evalFeature(ry.FS.distance, ["ball", "box"])
+            y1, J1 = self.C.evalFeature(ry.FS.distance, ["panda_coll0", box_name])
+            y2, J2 = self.C.evalFeature(ry.FS.distance, ["ball", box_name])
 
             if (y1 < -0.1) and (y2 < -0.1):
                 state_validated = True
@@ -412,6 +476,7 @@ class Worker:
         self.agent.trainer.model.eval() 
 
         episode_rewards = []
+        run_steps = []
         episodes = 0
         last_game_itr = 0
 
@@ -436,7 +501,8 @@ class Worker:
 
                 # Print basic game statistics
                 print("~~~~~~~~~~ Game ~~~~~~~~~~")
-                print('Running steps:           \t', itr - last_game_itr)
+                run_steps += [itr - last_game_itr]
+                print('Running steps:           \t', run_steps)
 
                 # save to indicate how many iterations for start to finish of the game:
                 last_game_itr = itr
@@ -454,9 +520,69 @@ class Worker:
 
                 print('Mean reward:             \t', episode_return_mean)
 
+                
+                sucess, fails = self.game.get_exec_stats()
+                print("Sucess times {}\nFail times {}".format(sucess,fails))
+
                 print("~~~~~~~~~~~~~~~~~~~~~~~~~~")
+
+                # only return if comparison is being performed
+                if sucess+fails == 20 and EXEC_COMPARISON:
+                    return (sucess, np.array(run_steps), np.array(l_episode_return))
 
             
 if __name__ == "__main__":
-    setup = Worker()
-    setup.evaluate_model(model_filename = 'model.pth')
+
+    if EXEC_COMPARISON:
+        storage = dict()
+        for box in box_names:
+            results = []
+            total_steps = []
+            total_rewards = []
+            box_name = box
+            for i in range(10):
+                result, steps, rewards = (0,0,0)
+                if box_name == "boxc":
+                    setup = Worker()
+                    result, steps, rewards = setup.evaluate_model(model_filename = 'model_cube_box.pth')
+                elif box_name == "boxr":
+                    setup = Worker()
+                    result, steps, rewards = setup.evaluate_model(model_filename = 'model_rectangle_box.pth')
+                elif box_name == "boxcl":
+                    setup = Worker()
+                    result, steps, rewards = setup.evaluate_model(model_filename = 'model_cylinder.pth')
+                results += [result]
+                total_steps += [steps]
+                total_rewards += [rewards]
+            storage[box_name] = (np.array(results), np.array(total_steps).flatten(), np.array(total_rewards).flatten())
+
+
+        fig, ax = plt.subplots()
+        fig.suptitle('Sucess rate', fontsize=14, fontweight='bold')
+        ax.set_title('10 batches of 20 experiments')
+        ax.set_ylabel('sucess')
+        ax.boxplot([ storage[box_names[0]][0],storage[box_names[1]][0],storage[box_names[2]][0] ], labels=box_labels)
+
+        fig1, ax1 = plt.subplots()
+        fig1.suptitle('Execution steps', fontsize=14, fontweight='bold')
+        ax1.set_title('10 batches of 20 experiments')
+        ax1.set_ylabel('steps')
+        ax1.boxplot([ storage[box_names[0]][1],storage[box_names[1]][1],storage[box_names[2]][1] ], labels=box_labels)
+
+        fig2, ax2 = plt.subplots()
+        fig2.suptitle('Rewards received', fontsize=14, fontweight='bold')
+        ax2.set_title('10 batches of 20 experiments')
+        ax2.set_ylabel('reward')
+        ax2.boxplot([ storage[box_names[0]][2],storage[box_names[1]][2],storage[box_names[2]][2] ], labels=box_labels)
+
+        hey = input("Press Enter to continue...")
+    else:
+        if box_name == "boxc":
+            setup = Worker()
+            result, steps, rewards = setup.evaluate_model(model_filename = 'model_cube_box.pth')
+        elif box_name == "boxr":
+            setup = Worker()
+            result, steps, rewards = setup.evaluate_model(model_filename = 'model_rectangle_box.pth')
+        elif box_name == "boxcl":
+            setup = Worker()
+            result, steps, rewards = setup.evaluate_model(model_filename = 'model_cylinder.pth')
