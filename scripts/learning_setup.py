@@ -9,6 +9,9 @@ import libry as ry
 import matplotlib.pyplot as plt
 import time
 
+box_names = ["boxc", "boxcl", "boxr"]
+box_labels = ["Cube", "Cylinder","Cuboid"]
+box_name = "boxcl"
 
 from pyquaternion import Quaternion
 import math
@@ -48,15 +51,12 @@ def rad_to_deg(angle):
 
 
   
-def start_direction(frame, code, cylinder=False, cube=True):
+def start_direction(frame, code):
     qd = Quaternion(frame.getQuaternion())
     psi   = math.atan2( 2 * (qd.w * qd.z + qd.x * qd.y), 1 - 2 * (qd.y**2 + qd.z**2) )
     
     R = np.array([[math.cos(psi), -math.sin(psi)],
                      [math.sin(psi), math.cos(psi)]])
-
-    if cylinder and cube:
-        raise ValueError("Can not have cylinder and cube settings in the same time")
 
     vel = .6
     dist = .116
@@ -73,13 +73,13 @@ def start_direction(frame, code, cylinder=False, cube=True):
         rel_start = np.array([-offset, dist])
         direction = np.array([0, -vel])
     elif code == 3:     
-        rel_start = np.array([dist if cube else distx, -offset])
+        rel_start = np.array([dist if box_name == "boxc" else distx, -offset])
         direction = np.array([-vel, 0])
     elif code == 4:     
-        rel_start = np.array([dist if cube else distx, 0])
+        rel_start = np.array([dist if box_name == "boxc" else distx, 0])
         direction = np.array([-vel, 0])
     elif code == 5:     
-        rel_start = np.array([dist if cube else distx, offset])
+        rel_start = np.array([dist if box_name == "boxc" else distx, offset])
         direction = np.array([-vel, 0])
     if code == 6:
         rel_start = np.array([-offset, -dist])
@@ -91,18 +91,18 @@ def start_direction(frame, code, cylinder=False, cube=True):
         rel_start = np.array([offset, -dist])
         direction = np.array([0, vel])
     elif code == 9:     
-        rel_start = np.array([-dist if cube else -distx, offset])
+        rel_start = np.array([-dist if box_name == "boxc" else -distx, offset])
         direction = np.array([vel, 0])
     elif code == 10:   
-        rel_start = np.array([-dist if cube else -distx, 0])
+        rel_start = np.array([-dist if box_name == "boxc" else -distx, 0])
         direction = np.array([vel, 0])
     elif code == 11: 
-        rel_start = np.array([-dist if cube else -distx, -offset])
+        rel_start = np.array([-dist if box_name == "boxc" else -distx, -offset])
         direction = np.array([vel, 0])
 
 
     # overwrite the rel_start and direction in case of cylinder
-    if cylinder:
+    if box_name == "boxcl":
         angle = code*2*math.pi/12
         if code == 2 or code == 5 or code ==8 or code == 11:
             direction *= 1.5
@@ -120,7 +120,7 @@ def start_direction(frame, code, cylinder=False, cube=True):
 
     direction = R.dot(direction)
     return list(pos) + [frame.getPosition()[2]] ,  list(direction) + [0.]
-    
+
 
 class Game:
 
@@ -132,7 +132,13 @@ class Game:
         self.S_verbose = self.C.simulation(ry.SimulatorEngine.bullet, True)
         
         self.tau = 0.02
-        self.box = self.C.getFrame("box")
+
+        self.box = self.C.getFrame(box_name)
+        for box in box_names:
+            if not box==box_name:
+                frame = self.C.getFrame(box)
+                frame.setPosition([0.,0.,0.])
+
         self.box_t = self.C.getFrame("box_t")
         self.ball = self.C.getFrame("ball")
         self.r_max = 2.4
@@ -270,7 +276,7 @@ class Game:
         
         if random_box_pos:
             # define the new state of the box to be somewhere around the target
-            init_radius = 0.075+.5*np.random.rand()
+            init_radius = 0.075+.2*np.random.rand()
             alpha = 2*math.pi*np.random.rand()
             x = init_radius*math.cos(alpha)
             y = init_radius*math.sin(alpha)
@@ -521,7 +527,7 @@ class Worker:
             act[move] = 1
 
             # perform move
-            reward, done, score = self.game.step(act, True)
+            reward, done, score = self.game.step(act, self.dec_ball_action, True)
 
             episode_rewards.append(reward)
 

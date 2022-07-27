@@ -17,9 +17,25 @@ This repo is based on RAI code, including its python bindings. See https://githu
 
 ## Quick Start
 
-The repo is now used for three lecture formats: the robotics lab
-course in simulation, the robotics lab course in real, and the
-robotics lectures. Please follow the respective sections.
+`learning_setup.py` is used to train the network.
+Configuration params within the file:
+- box_name # chose among "boxc", "boxcl", "boxr" 
+- EVALUATION # for runnig the network in evaluation mode
+- WARM_START # for starting the network training from saved model
+- Worker object can be initialized with many params (among others):
+  - sim_verbose_freq_episodes # define the simulation verbose 
+
+
+`learning_setup_exec_panda.py` is used to execute the trained network together with KOMO for PANDA manipulation.
+Configuration params within the file:
+- box_name # chose among "boxc", "boxcl", "boxr" 
+- EXEC_COMPARISON # run evaluation for all different box shapes (10 times 20 runs) 
+- Worker object can be initialized with many params (among others):
+  - sim_verbose_freq_episodes # define the simulation verbose 
+
+
+
+
 
 ### Documentation
 
