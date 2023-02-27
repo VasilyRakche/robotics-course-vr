@@ -1,12 +1,13 @@
-# MLR robotics course & practical robotics course
+# Deep-RL for robot object manipulation
 
-This repo is based on RAI code, including its python bindings. See https://github.com/MarcToussaint/rai for a README of the RAI code.
+This repo contains an implementation of the Deep Reinforcement strategy for learning object manipulation. It has been developed for a Final Project of AI & Robotics: Lab Course at TU Berlin. It uses optimization framework for handling robot dynamics - [K-order Markov Optimization within RAI](https://github.com/MarcToussaint/rai) and learning methods for task execution and planning. 
+
+
+https://user-images.githubusercontent.com/30003101/221697549-c54a114f-2180-4e89-bfb1-4c8d6802543a.mp4
 
 ## Table of Contents
-- [MLR robotics course & practical robotics course](#mlr-robotics-course--practical-robotics-course)
-  - [Table of Contents](#table-of-contents)
   - [Quick Start](#quick-start)
-    - [Documentation](#documentation)
+    - [Documentation: Robot dynamics](#documentation-robot-dynamics)
     - [Setup for Robotics Lab Course in Simulation](#setup-for-robotics-lab-course-in-simulation)
 - [Further Documentation & Installation Pointers](#further-documentation--installation-pointers)
   - [Installation](#installation)
@@ -17,30 +18,32 @@ This repo is based on RAI code, including its python bindings. See https://githu
 
 ## Quick Start
 
-`learning_setup.py` is used to train the network.
+[scripts/learning_setup.py](https://github.com/VasilyRakche/robotics-course-vr/blob/master/scripts/learning_setup.py) is used to train the network.
 Configuration params within the file:
-- box_name # chose among "boxc", "boxcl", "boxr" 
+- box_name 
+    - "boxc": cube
+    - "boxcl": cilynder
+    - "boxr": rectangle 
 - EVALUATION # for runnig the network in evaluation mode
 - WARM_START # for starting the network training from saved model
 - Worker object can be initialized with many params (among others):
   - sim_verbose_freq_episodes # define the simulation verbose 
 
 
-`learning_setup_exec_panda.py` is used to execute the trained network together with KOMO for PANDA manipulation.
+[learning_setup_exec_panda.py](https://github.com/VasilyRakche/robotics-course-vr/blob/master/scripts/learning_setup_exec_panda.py) is used to execute the trained network together with KOMO for PANDA manipulation.
 Configuration params within the file:
-- box_name # chose among "boxc", "boxcl", "boxr" 
+- box_name 
+    - "boxc": cube
+    - "boxcl": cilynder
+    - "boxr": rectangle 
 - EXEC_COMPARISON # run evaluation for all different box shapes (10 times 20 runs) 
 - Worker object can be initialized with many params (among others):
   - sim_verbose_freq_episodes # define the simulation verbose 
 
 
+### Documentation: Robot dynamics
 
-
-
-### Documentation
-
-* [Course material and some documentation of the code base and python bindings](https://marctoussaint.github.io/robotics-course/)
-
+* [RAI Course material and some documentation of the code base and python bindings](https://marctoussaint.github.io/robotics-course/)
 
 ### Setup for Robotics Lab Course in Simulation
 
